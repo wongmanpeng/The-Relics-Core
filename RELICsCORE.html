@@ -5,18 +5,14 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>遗迹核心：觉醒</title>
+    <title>遗迹核心：色彩觉醒</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
     <style>
         body {
             margin: 0;
-            background: #0a0f0a;
+            background: #050a05;
             overflow: hidden;
             touch-action: none;
-        }
-
-        canvas {
-            display: block;
         }
     </style>
 </head>
@@ -29,15 +25,14 @@
         let WOODS = [];
         let BOLTS = [];
         let IS_GAMEOVER = false;
-        const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff]; // 对应你图里的水晶颜色
+        // 严格对应的颜色阵列：青色(0)、绿色(1)、橙色(2)、紫色(3)
+        const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff];
 
-        // 简单的音效引擎
         const AudioSynth = {
             ctx: null,
             play(freq, type = 'sine', dur = 0.1) {
                 try {
                     if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-                    if (this.ctx.state === 'suspended') this.ctx.resume();
                     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
                     o.type = type; o.frequency.setValueAtTime(freq, this.ctx.currentTime);
                     g.gain.setValueAtTime(0.1, this.ctx.currentTime);
@@ -53,8 +48,8 @@
             width: 750,
             height: 1334,
             parent: 'game-container',
-            backgroundColor: '#050a05',
-            physics: { default: 'matter', matter: { gravity: { y: 2.5 }, debug: false } },
+            backgroundColor: '#020502',
+            physics: { default: 'matter', matter: { gravity: { y: 2.8 }, debug: false } },
             scene: { create },
             scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }
         };
@@ -65,61 +60,85 @@
             const { width, height } = this.scale;
             const scene = this;
 
-            // --- 1. 纯代码绘制所有图形 (核心修复：不再依赖外部图片) ---
+            // --- 1. 纹理绘制 ---
             const g = this.make.graphics({ x: 0, y: 0, add: false });
-
-            // 绘制石块 (带风化质感边框)
-            g.fillStyle(0x444d44).fillRect(0, 0, 500, 80);
-            g.lineStyle(4, 0x222a22).strokeRect(2, 2, 496, 76);
+            // 石板
+            g.fillStyle(0x3d453d).fillRect(0, 0, 500, 80);
+            g.lineStyle(4, 0x1a201a).strokeRect(2, 2, 496, 76);
             g.generateTexture('stone', 500, 80);
             g.clear();
-
-            // 绘制发光水晶 (六边形)
-            g.fillStyle(0xffffff);
-            g.fillPoints([{ x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 }, { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }], true);
+            // 水晶
+            g.fillStyle(0xffffff).fillPoints([{ x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 }, { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }], true);
             g.generateTexture('crystal', 50, 50);
             g.clear();
-
-            // 绘制成功弹窗背景
-            g.fillStyle(0x111111, 0.9).fillRoundedRect(0, 0, 550, 350, 30);
-            g.lineStyle(6, 0xd4af37).strokeRoundedRect(5, 5, 540, 340, 30);
+            // 弹窗
+            g.fillStyle(0x111, 0.95).fillRoundedRect(0, 0, 550, 350, 30);
+            g.lineStyle(5, 0xd4af37).strokeRoundedRect(4, 4, 542, 342, 30);
             g.generateTexture('modal', 550, 350);
 
-            // --- 2. 场景布局 ---
-            // 顶部石盘
+            // --- 2. 顶部：带颜色对应的仪式碗 ---
             this.texts = [];
+            this.bowlGlows = []; // 存储光晕以便做动画
+
             COLORS.forEach((color, i) => {
                 const x = 125 + i * 165;
-                this.add.circle(x, 150, 65, 0x222a22).setStrokeStyle(3, 0xd4af37);
-                const t = this.add.text(x, 150, '0', { fontSize: '60px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+                const y = 160;
+
+                // 碗底座
+                this.add.circle(x, y, 65, 0x1a1a1a).setStrokeStyle(3, 0x333);
+
+                // --- 核心优化：对应的颜色光晕 ---
+                const glow = this.add.circle(x, y, 55, color, 0.3).setDepth(1);
+                this.bowlGlows.push(glow);
+
+                // 呼吸灯效果
+                this.tweens.add({ targets: glow, alpha: 0.1, scale: 0.9, duration: 2000, yoyo: true, repeat: -1 });
+
+                // 计数文字
+                const t = this.add.text(x, y, '0', {
+                    fontSize: '65px', color: '#ffffff', fontStyle: 'bold'
+                }).setOrigin(0.5).setDepth(2).setShadow(2, 2, '#000', 2);
+
                 this.texts.push(t);
             });
 
-            // 物理关卡 (爱心结构)
+            // --- 3. 物理关卡 ---
             const layout = [
-                { x: 230, y: 550, angle: -35, w: 320, c: 0 },
-                { x: 520, y: 550, angle: 35, w: 320, c: 0 },
-                { x: 375, y: 780, angle: 0, w: 520, c: 2 },
-                { x: 180, y: 1050, angle: 90, w: 380, c: 1 },
-                { x: 570, y: 1050, angle: 90, w: 380, c: 3 }
+                { x: 230, y: 550, angle: -35, w: 320, c: 0 }, // 青
+                { x: 520, y: 550, angle: 35, w: 320, c: 0 },  // 青
+                { x: 375, y: 780, angle: 0, w: 520, c: 2 },   // 橙
+                { x: 180, y: 1050, angle: 90, w: 380, c: 1 },  // 绿
+                { x: 570, y: 1050, angle: 90, w: 380, c: 3 }   // 紫
             ];
 
             layout.forEach((data, i) => {
-                let stone = this.matter.add.sprite(data.x, data.y, 'stone').setDisplaySize(data.w, 80).setStatic(true).setAngle(data.angle);
-                let glow = this.add.circle(data.x, data.y, 60, COLORS[data.c], 0.2);
-                let crys = this.add.image(data.x, data.y, 'crystal').setTint(COLORS[data.c]).setScale(1.2).setInteractive();
+                let stone = this.matter.add.sprite(data.x, data.y, 'stone').setDisplaySize(data.w, 85).setStatic(true).setAngle(data.angle);
+                let glow = this.add.circle(data.x, data.y, 65, COLORS[data.c], 0.25);
+                let crys = this.add.image(data.x, data.y, 'crystal').setTint(COLORS[data.c]).setScale(1.3).setInteractive();
 
                 crys.on('pointerdown', () => {
                     if (IS_GAMEOVER) return;
                     saveSnapshot();
-                    AudioSynth.play(600 + data.c * 100);
+                    AudioSynth.play(500 + data.c * 150);
 
                     crys.setVisible(false).disableInteractive();
                     glow.setVisible(false);
                     stone.setStatic(false); // 木头掉落
 
+                    // 更新计数
                     CURRENT_COUNTS[data.c]++;
                     this.texts[data.c].setText(CURRENT_COUNTS[data.c]);
+
+                    // --- 核心优化：碗的颜色反馈动画 ---
+                    const targetGlow = this.bowlGlows[data.c];
+                    scene.tweens.add({
+                        targets: targetGlow,
+                        scale: 1.5,
+                        alpha: 0.6,
+                        duration: 150,
+                        yoyo: true,
+                        ease: 'Quad.easeOut'
+                    });
 
                     checkWin(scene);
                 });
@@ -127,10 +146,10 @@
                 BOLTS.push({ crys, glow });
             });
 
-            // --- 3. 撤回按钮 ---
-            const undoBtn = this.add.container(width / 2, height - 120);
-            const uCircle = this.add.circle(0, 0, 70, 0x222a22).setStrokeStyle(4, 0xd4af37).setInteractive();
-            undoBtn.add([uCircle, this.add.text(0, 0, 'UNDO', { fontSize: '30px', color: '#d4af37' }).setOrigin(0.5)]);
+            // --- 4. 底部 UNDO ---
+            const uCircle = this.add.circle(width / 2, height - 120, 75, 0x1a1a1a).setStrokeStyle(4, 0xd4af37).setInteractive();
+            this.add.text(width / 2, height - 120, 'UNDO', { fontSize: '30px', color: '#d4af37' }).setOrigin(0.5);
+
             uCircle.on('pointerdown', () => {
                 if (HISTORY.length === 0 || IS_GAMEOVER) return;
                 const last = HISTORY.pop();
@@ -146,23 +165,24 @@
                 });
             });
 
-            // --- 4. 成功弹窗 (初始隐藏) ---
+            // --- 5. 成功弹窗 ---
             this.winModal = this.add.container(width / 2, height / 2).setDepth(100).setVisible(false).setScale(0);
-            const mBg = this.add.image(0, 0, 'modal');
-            const mTxt = this.add.text(0, -40, '你成功了！', { fontSize: '50px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5);
-            const mBtn = this.add.rectangle(0, 80, 220, 70, 0xd4af37).setInteractive();
-            const mBtnT = this.add.text(0, 80, '再玩一次', { fontSize: '28px', color: '#000', fontStyle: 'bold' }).setOrigin(0.5);
-            this.winModal.add([mBg, mTxt, mBtn, mBtnT]);
-            mBtn.on('pointerdown', () => location.reload());
+            this.winModal.add([
+                this.add.image(0, 0, 'modal'),
+                this.add.text(0, -50, '能量已觉醒', { fontSize: '55px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5),
+                this.add.text(0, 20, '你成功引导了古老的遗迹', { fontSize: '28px', color: '#fff', alpha: 0.7 }).setOrigin(0.5),
+                this.add.rectangle(0, 100, 240, 70, 0xd4af37).setInteractive().on('pointerdown', () => location.reload()),
+                this.add.text(0, 100, '再玩一次', { fontSize: '30px', color: '#000', fontStyle: 'bold' }).setOrigin(0.5)
+            ]);
         }
 
         function checkWin(scene) {
             if (BOLTS.every(b => !b.crys.visible)) {
                 IS_GAMEOVER = true;
-                scene.time.delayedCall(800, () => {
+                scene.time.delayedCall(1000, () => {
                     scene.winModal.setVisible(true);
-                    scene.tweens.add({ targets: scene.winModal, scale: 1, duration: 500, ease: 'Back.easeOut' });
-                    AudioSynth.play(1000, 'sine', 0.5);
+                    scene.tweens.add({ targets: scene.winModal, scale: 1, duration: 600, ease: 'Back.easeOut' });
+                    AudioSynth.play(1000, 'sine', 0.6);
                 });
             }
         }
