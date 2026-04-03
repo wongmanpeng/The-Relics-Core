@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>遗迹核心 3D - 物理修复版</title>
+    <title>遗迹核心 3D - 物理重力版</title>
     <style>
         body {
             margin: 0;
@@ -48,6 +48,7 @@
             border-radius: 20px;
             text-align: center;
             transition: 0.5s cubic-bezier(0.17, 0.89, 0.32, 1.28);
+            z-index: 100;
         }
     </style>
 </head>
@@ -61,9 +62,8 @@
     </div>
     <div id="win-msg">
         <h2 style="color:#d4af37; font-size: 40px;">你成功了！</h2>
-        <p>所有能量核心已归位</p>
         <button onclick="location.reload()"
-            style="padding:10px 30px; cursor:pointer; background:#d4af37; border:none; font-weight:bold;">重启仪式</button>
+            style="padding:15px 30px; cursor:pointer; background:#d4af37; border:none; font-weight:bold; border-radius:10px;">再来一局</button>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -75,11 +75,12 @@
         let counts = [0, 0, 0, 0];
         const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff];
 
+        // 初始化
         init();
         animate();
 
         function init() {
-            // 1. 渲染器设置
+            // 1. 3D 场景与相机
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x020502);
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -87,56 +88,63 @@
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
-            // 2. 强化重力物理世界
+            // 2. 物理世界配置
             world = new CANNON.World();
-            world.gravity.set(0, -20, 0); // 增加重力加速度，让掉落更干脆
+            world.gravity.set(0, -25, 0); // 极强的重力
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
 
-            // 3. 灯光
-            const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+            // 3. 环境光
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambient);
-            const pointLight = new THREE.PointLight(0xffffff, 1);
-            pointLight.position.set(5, 5, 10);
-            scene.add(pointLight);
+            const light = new THREE.PointLight(0xffffff, 1);
+            light.position.set(10, 10, 10);
+            scene.add(light);
 
-            // 4. 创建 3D 关卡
+            // 4. 构建爱心关卡
             const layout = [
-                { x: -3.2, y: 3.5, z: 0, rot: 0.6, w: 4.8, c: 0 },
-                { x: 3.2, y: 3.5, z: 0, rot: -0.6, w: 4.8, c: 0 },
-                { x: 0, y: 0.5, z: 0.5, rot: 0, w: 7.5, c: 2 },
-                { x: -2.8, y: -3, z: 0, rot: 1.57, w: 5.5, c: 1 },
-                { x: 2.8, y: -3, z: 0, rot: 1.57, w: 5.5, c: 3 }
+                { x: -3.5, y: 4, z: 0, rot: 0.6, w: 5, c: 0 },
+                { x: 3.5, y: 4, z: 0, rot: -0.6, w: 5, c: 0 },
+                { x: 0, y: 1, z: 0, rot: 0, w: 8, c: 2 },
+                { x: -3, y: -3, z: 0, rot: 1.57, w: 6, c: 1 },
+                { x: 3, y: -3, z: 0, rot: 1.57, w: 6, c: 3 }
             ];
 
             layout.forEach((data, i) => {
-                // 创建 3D 石柱
-                const geo = new THREE.BoxGeometry(data.w, 0.8, 1.5);
-                const mat = new THREE.MeshPhongMaterial({ color: 0x3a403a });
+                // --- 创建 3D 石条 ---
+                const geo = new THREE.BoxGeometry(data.w, 0.8, 1.2);
+                const mat = new THREE.MeshPhongMaterial({ color: 0x4a504a });
                 const mesh = new THREE.Mesh(geo, mat);
                 scene.add(mesh);
 
-                const body = new CANNON.Body({ mass: 0 }); // 初始 mass 为 0 表示静止不动
-                body.addShape(new CANNON.Box(new CANNON.Vec3(data.w / 2, 0.4, 0.75)));
+                // --- 创建物理刚体 ---
+                const body = new CANNON.Body({
+                    mass: 0, // 初始静态
+                    type: CANNON.Body.STATIC,
+                    allowSleep: true
+                });
+                body.addShape(new CANNON.Box(new CANNON.Vec3(data.w / 2, 0.4, 0.6)));
                 body.position.set(data.x, data.y, data.z);
                 body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), data.rot);
                 world.addBody(body);
                 stones.push({ mesh, body });
 
-                // 创建 3D 发光水晶
+                // --- 创建发光水晶 ---
                 const crysGeo = new THREE.OctahedronGeometry(0.6);
                 const crysMat = new THREE.MeshPhongMaterial({
-                    color: COLORS[data.c], emissive: COLORS[data.c], emissiveIntensity: 0.8
+                    color: COLORS[data.c], emissive: COLORS[data.c], emissiveIntensity: 1
                 });
                 const crysMesh = new THREE.Mesh(crysGeo, crysMat);
-                crysMesh.position.set(data.x, data.y, data.z + 1);
+                crysMesh.position.set(data.x, data.y, data.z + 1.2);
                 crysMesh.userData = { id: i, colorIdx: data.c };
                 scene.add(crysMesh);
                 crystals.push(crysMesh);
             });
 
-            // 5. 交互点击
+            // 5. 点击交互
             const raycaster = new THREE.Raycaster();
             const mouse = new THREE.Vector2();
 
@@ -145,21 +153,31 @@
                 mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
                 raycaster.setFromCamera(mouse, camera);
 
-                const hit = raycaster.intersectObjects(crystals);
-                if (hit.length > 0 && hit[0].object.visible) {
-                    const obj = hit[0].object;
-                    const idx = obj.userData.id;
-                    const cIdx = obj.userData.colorIdx;
+                const hits = raycaster.intersectObjects(crystals);
+                if (hits.length > 0 && hits[0].object.visible) {
+                    const crystal = hits[0].object;
+                    const sIdx = crystal.userData.id;
+                    const cIdx = crystal.userData.colorIdx;
 
-                    // 水晶消失与计数
-                    obj.visible = false;
+                    // 1. 水晶消失
+                    crystal.visible = false;
+
+                    // 2. UI 计数
                     counts[cIdx]++;
                     document.getElementById(`c${cIdx}`).innerText = counts[cIdx];
 
-                    // 物理唤醒：将石柱质量改为 5，使其受重力掉落
-                    stones[idx].body.mass = 5;
-                    stones[idx].body.updateMassProperties();
-                    stones[idx].body.type = CANNON.Body.DYNAMIC;
+                    // 3. 强制激活物理掉落 (重点修复)
+                    const targetBody = stones[sIdx].body;
+                    targetBody.type = CANNON.Body.DYNAMIC; // 切换为动态
+                    targetBody.mass = 10;                  // 给它重量
+                    targetBody.updateMassProperties();     // 刷新物理属性
+                    targetBody.wakeUp();                   // 强制唤醒
+
+                    // 给个小推力，防止垂直死锁
+                    targetBody.applyImpulse(
+                        new CANNON.Vec3(0, -1, 0.5),
+                        new CANNON.Vec3(targetBody.position.x + 0.1, targetBody.position.y, targetBody.position.z)
+                    );
 
                     checkWin();
                 }
@@ -170,27 +188,33 @@
             if (crystals.every(c => !c.visible)) {
                 setTimeout(() => {
                     document.getElementById('win-msg').style.transform = 'translate(-50%, -50%) scale(1)';
-                }, 1200);
+                }, 1000);
             }
         }
 
         function animate() {
             requestAnimationFrame(animate);
+
+            // 步进物理世界
             world.step(1 / 60);
 
-            // 同步物理位置到 3D 模型
+            // 渲染同步
             stones.forEach(s => {
                 s.mesh.position.copy(s.body.position);
                 s.mesh.quaternion.copy(s.body.quaternion);
             });
 
             crystals.forEach(c => {
-                if (c.visible) c.rotation.y += 0.03; // 水晶自转动画
+                if (c.visible) {
+                    c.rotation.y += 0.04;
+                    c.rotation.z += 0.01;
+                }
             });
 
             renderer.render(scene, camera);
         }
 
+        // 屏幕适配
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
