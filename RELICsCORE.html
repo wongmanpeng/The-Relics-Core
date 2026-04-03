@@ -50,6 +50,30 @@
             g.lineStyle(4, 0x000, 0.5).strokeCircle(35, 35, 30);
             g.generateTexture('orb', 70, 70);
 
+            // --- 引导文字 (中英文) ---
+            const guideText = this.add.text(width / 2, height / 2 - 350,
+                "先解除外层的封印\nUnlock the outer layers first",
+                {
+                    fontSize: '32px',
+                    color: '#d4af37',
+                    align: 'center',
+                    fontStyle: 'bold',
+                    stroke: '#000',
+                    strokeThickness: 4
+                }
+            ).setOrigin(0.5).setAlpha(0);
+
+            // 文字呼吸动画
+            this.tweens.add({
+                targets: guideText,
+                alpha: 0.8,
+                y: height / 2 - 380,
+                duration: 2000,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+
             // --- 顶部 UI ---
             this.uiTexts = [];
             COLORS.forEach((color, i) => {
@@ -58,38 +82,36 @@
                 this.uiTexts[i] = this.add.text(x, 150, '0', { fontSize: '60px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
             });
 
-            // --- 核心：三层布局数据 ---
+            // --- 三层布局数据 ---
             const layout = [
-                // 第一层 (最外层/最亮/最大)
-                { layer: 1, x: 200, y: 500, angle: -40, w: 380, c: 0 },
-                { layer: 1, x: 550, y: 500, angle: 40, w: 380, c: 0 },
+                // 第一层 (最外层/深色/最亮/最大)
+                { layer: 1, x: 200, y: 550, angle: -40, w: 380, c: 0 },
+                { layer: 1, x: 550, y: 550, angle: 40, w: 380, c: 0 },
                 { layer: 1, x: 375, y: 1150, angle: 0, w: 220, c: 1 },
 
-                // 第二层 (中间层/缩放 0.85/调暗)
-                { layer: 2, x: 375, y: 750, angle: 0, w: 500, c: 2 },
-                { layer: 2, x: 180, y: 850, angle: 90, w: 380, c: 3 },
-                { layer: 2, x: 570, y: 850, angle: 90, w: 380, c: 3 },
+                // 第二层 (中间层)
+                { layer: 2, x: 375, y: 800, angle: 0, w: 500, c: 2 },
+                { layer: 2, x: 180, y: 900, angle: 90, w: 380, c: 3 },
+                { layer: 2, x: 570, y: 900, angle: 90, w: 380, c: 3 },
 
-                // 第三层 (核心心尖/最深处/缩放 0.7/最暗)
-                { layer: 3, x: 375, y: 950, angle: 0, w: 250, c: 2 }
+                // 第三层 (心尖核心)
+                { layer: 3, x: 375, y: 1000, angle: 0, w: 250, c: 2 }
             ];
 
             layout.forEach((data, i) => {
-                // 设置景深缩放
                 const depthScale = data.layer === 1 ? 1 : (data.layer === 2 ? 0.85 : 0.7);
                 const depthAlpha = data.layer === 1 ? 1 : (data.layer === 2 ? 0.4 : 0.2);
 
-                // 石条
                 const stone = this.matter.add.sprite(data.x, data.y, 'stone');
                 stone.setDisplaySize(data.w * depthScale, 80 * depthScale);
                 stone.setStatic(true).setAngle(data.angle).setDepth(10 - data.layer);
-                stone.setTint(data.layer === 1 ? 0xffffff : 0x222222); // 未解锁层变黑
 
-                // 水晶
+                // 第一层初始就是正常的深色石条，后两层锁定
+                stone.setTint(data.layer === 1 ? 0xffffff : 0x222222);
+
                 const crystal = this.add.image(data.x, data.y, 'orb').setTint(COLORS[data.c]);
                 crystal.setDepth(20 - data.layer).setScale(depthScale).setAlpha(depthAlpha);
 
-                // 发光圈
                 const glow = this.add.circle(data.x, data.y, 60 * depthScale, COLORS[data.c], 0.4)
                     .setDepth(crystal.depth - 1).setVisible(data.layer === 1);
 
@@ -108,7 +130,6 @@
                     COUNTS[data.c]++;
                     this.uiTexts[data.c].setText(COUNTS[data.c]);
 
-                    // 检查本层是否清除
                     checkLayerClear(scene, data.layer);
                 });
 
@@ -121,35 +142,26 @@
 
             if (remaining.length === 0 && ACTIVE_LAYER < 3) {
                 ACTIVE_LAYER++;
-                // 解锁下一层动画
                 CRYSTALS.forEach(c => {
                     if (c.layer === ACTIVE_LAYER) {
                         c.obj.setInteractive();
-                        // 视觉唤醒：变亮、放大、加发光
                         scene.tweens.add({
-                            targets: c.obj,
-                            alpha: 1,
-                            scale: c.baseScale * 1.2,
-                            duration: 600,
-                            ease: 'Back.easeOut',
-                            onComplete: () => {
-                                scene.tweens.add({ targets: c.obj, scale: c.baseScale * 1.1, duration: 800, yoyo: true, repeat: -1 });
-                            }
+                            targets: c.obj, alpha: 1, scale: c.baseScale * 1.2, duration: 600, ease: 'Back.easeOut',
+                            onComplete: () => { scene.tweens.add({ targets: c.obj, scale: c.baseScale * 1.1, duration: 800, yoyo: true, repeat: -1 }); }
                         });
                         c.stone.setTint(0xffffff);
                         c.glow.setVisible(true);
                     }
                 });
             } else if (CRYSTALS.every(c => !c.obj.visible)) {
-                // 真正的全清胜利
                 showWin(scene);
             }
         }
 
         function showWin(scene) {
             const { width, height } = scene.scale;
-            const bg = scene.add.rectangle(width / 2, height / 2, width, height, 0x000, 0.8).setDepth(100);
-            const title = scene.add.text(width / 2, height / 2 - 100, "觉醒成功", { fontSize: '80px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5).setDepth(101);
+            scene.add.rectangle(width / 2, height / 2, width, height, 0x000, 0.8).setDepth(100);
+            scene.add.text(width / 2, height / 2 - 100, "觉醒成功", { fontSize: '80px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5).setDepth(101);
             const btn = scene.add.rectangle(width / 2, height / 2 + 50, 300, 80, 0xd4af37).setDepth(101).setInteractive();
             scene.add.text(width / 2, height / 2 + 50, "再启仪式", { fontSize: '32px', color: '#000' }).setOrigin(0.5).setDepth(102);
             btn.on('pointerdown', () => location.reload());
