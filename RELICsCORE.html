@@ -5,14 +5,18 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>文明遗迹：觉醒 - 终极版</title>
+    <title>遗迹核心：觉醒</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
     <style>
         body {
             margin: 0;
-            background: #030803;
+            background: #0a0f0a;
             overflow: hidden;
             touch-action: none;
+        }
+
+        canvas {
+            display: block;
         }
     </style>
 </head>
@@ -25,14 +29,15 @@
         let WOODS = [];
         let BOLTS = [];
         let IS_GAMEOVER = false;
-        const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff];
-        const RUNES = ['ᚠ', 'ᚢ', 'ᚦ', 'ᚨ'];
+        const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff]; // 对应你图里的水晶颜色
 
+        // 简单的音效引擎
         const AudioSynth = {
             ctx: null,
             play(freq, type = 'sine', dur = 0.1) {
                 try {
                     if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
                     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
                     o.type = type; o.frequency.setValueAtTime(freq, this.ctx.currentTime);
                     g.gain.setValueAtTime(0.1, this.ctx.currentTime);
@@ -49,7 +54,7 @@
             height: 1334,
             parent: 'game-container',
             backgroundColor: '#050a05',
-            physics: { default: 'matter', matter: { gravity: { y: 2.8 }, debug: false } },
+            physics: { default: 'matter', matter: { gravity: { y: 2.5 }, debug: false } },
             scene: { create },
             scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }
         };
@@ -60,36 +65,37 @@
             const { width, height } = this.scale;
             const scene = this;
 
-            // --- 1. 纹理生成 ---
+            // --- 1. 纯代码绘制所有图形 (核心修复：不再依赖外部图片) ---
             const g = this.make.graphics({ x: 0, y: 0, add: false });
-            // 石板
-            g.fillStyle(0x3d3d3d).fillRect(0, 0, 500, 80);
-            g.lineStyle(4, 0x1a1a1a).strokeRect(2, 2, 496, 76);
-            g.generateTexture('stone_brick', 500, 80);
-            g.clear();
-            // 成功窗口背景
-            g.fillStyle(0x1a1a1a, 0.95).fillRoundedRect(0, 0, 500, 300, 20);
-            g.lineStyle(6, 0xd4af37).strokeRoundedRect(3, 3, 494, 294, 20);
-            g.generateTexture('modal_bg', 500, 300);
-            g.clear();
-            // 宝石
-            g.fillStyle(0xffffff).fillPoints([{ x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 }, { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }], true);
-            g.generateTexture('gem', 50, 50);
 
-            // --- 2. 界面布局 ---
+            // 绘制石块 (带风化质感边框)
+            g.fillStyle(0x444d44).fillRect(0, 0, 500, 80);
+            g.lineStyle(4, 0x222a22).strokeRect(2, 2, 496, 76);
+            g.generateTexture('stone', 500, 80);
+            g.clear();
+
+            // 绘制发光水晶 (六边形)
+            g.fillStyle(0xffffff);
+            g.fillPoints([{ x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 }, { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }], true);
+            g.generateTexture('crystal', 50, 50);
+            g.clear();
+
+            // 绘制成功弹窗背景
+            g.fillStyle(0x111111, 0.9).fillRoundedRect(0, 0, 550, 350, 30);
+            g.lineStyle(6, 0xd4af37).strokeRoundedRect(5, 5, 540, 340, 30);
+            g.generateTexture('modal', 550, 350);
+
+            // --- 2. 场景布局 ---
+            // 顶部石盘
             this.texts = [];
-            this.bowlContainers = [];
             COLORS.forEach((color, i) => {
-                const x = 120 + i * 170;
-                const container = this.add.container(x, 150);
-                const glow = this.add.circle(0, 0, 65, color, 0.2);
-                const txt = this.add.text(0, -10, '0', { fontSize: '70px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
-                container.add([glow, txt]);
-                this.texts.push(txt);
-                this.bowlContainers.push(container);
+                const x = 125 + i * 165;
+                this.add.circle(x, 150, 65, 0x222a22).setStrokeStyle(3, 0xd4af37);
+                const t = this.add.text(x, 150, '0', { fontSize: '60px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+                this.texts.push(t);
             });
 
-            // 物理关卡
+            // 物理关卡 (爱心结构)
             const layout = [
                 { x: 230, y: 550, angle: -35, w: 320, c: 0 },
                 { x: 520, y: 550, angle: 35, w: 320, c: 0 },
@@ -99,78 +105,64 @@
             ];
 
             layout.forEach((data, i) => {
-                let stone = this.matter.add.sprite(data.x, data.y, 'stone_brick');
-                stone.setDisplaySize(data.w, 80).setStatic(true).setAngle(data.angle);
-                WOODS.push(stone);
+                let stone = this.matter.add.sprite(data.x, data.y, 'stone').setDisplaySize(data.w, 80).setStatic(true).setAngle(data.angle);
+                let glow = this.add.circle(data.x, data.y, 60, COLORS[data.c], 0.2);
+                let crys = this.add.image(data.x, data.y, 'crystal').setTint(COLORS[data.c]).setScale(1.2).setInteractive();
 
-                let glow = this.add.circle(data.x, data.y, 65, COLORS[data.c], 0.2);
-                let gem = this.add.image(data.x, data.y, 'gem').setTint(COLORS[data.c]).setScale(1.2).setInteractive();
-
-                gem.on('pointerdown', () => {
+                crys.on('pointerdown', () => {
                     if (IS_GAMEOVER) return;
                     saveSnapshot();
-                    AudioSynth.play(800 + data.c * 100);
-                    gem.setVisible(false).disableInteractive();
+                    AudioSynth.play(600 + data.c * 100);
+
+                    crys.setVisible(false).disableInteractive();
                     glow.setVisible(false);
+                    stone.setStatic(false); // 木头掉落
 
                     CURRENT_COUNTS[data.c]++;
                     this.texts[data.c].setText(CURRENT_COUNTS[data.c]);
-                    stone.setStatic(false);
 
-                    checkWin(scene); // 核心：检查是否胜利
+                    checkWin(scene);
                 });
-                BOLTS.push({ gem, glow });
+                WOODS.push(stone);
+                BOLTS.push({ crys, glow });
             });
 
-            // --- 3. 成功弹窗系统 ---
-            this.winModal = this.add.container(width / 2, height / 2).setDepth(100).setVisible(false).setScale(0);
-            const modalBg = this.add.image(0, 0, 'modal_bg');
-            const winTitle = this.add.text(0, -50, '你成功了！', { fontSize: '50px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5);
-            const winSub = this.add.text(0, 30, '古文明守护者已觉醒', { fontSize: '28px', color: '#ffffff', alpha: 0.8 }).setOrigin(0.5);
-
-            // 重启按钮
-            const restartBtn = this.add.rectangle(0, 100, 200, 60, 0xd4af37).setInteractive();
-            const restartTxt = this.add.text(0, 100, '再玩一次', { fontSize: '24px', color: '#000', fontStyle: 'bold' }).setOrigin(0.5);
-
-            this.winModal.add([modalBg, winTitle, winSub, restartBtn, restartTxt]);
-
-            restartBtn.on('pointerdown', () => { location.reload(); });
-
-            // 撤回按钮
-            const undoBtn = this.add.container(width / 2, height - 150);
-            const uBtn = this.add.circle(0, 0, 80, 0x222).setStrokeStyle(4, 0xd4af37).setInteractive();
-            undoBtn.add([uBtn, this.add.text(0, 0, 'UNDO', { fontSize: '32px', color: '#d4af37' }).setOrigin(0.5)]);
-
-            uBtn.on('pointerdown', () => {
+            // --- 3. 撤回按钮 ---
+            const undoBtn = this.add.container(width / 2, height - 120);
+            const uCircle = this.add.circle(0, 0, 70, 0x222a22).setStrokeStyle(4, 0xd4af37).setInteractive();
+            undoBtn.add([uCircle, this.add.text(0, 0, 'UNDO', { fontSize: '30px', color: '#d4af37' }).setOrigin(0.5)]);
+            uCircle.on('pointerdown', () => {
                 if (HISTORY.length === 0 || IS_GAMEOVER) return;
                 const last = HISTORY.pop();
                 CURRENT_COUNTS = [...last.c];
                 CURRENT_COUNTS.forEach((n, i) => this.texts[i].setText(n));
                 last.b.forEach((b, i) => {
-                    BOLTS[i].gem.setVisible(b.v);
+                    BOLTS[i].crys.setVisible(b.v);
                     BOLTS[i].glow.setVisible(b.v);
-                    if (b.v) BOLTS[i].gem.setInteractive();
+                    if (b.v) BOLTS[i].crys.setInteractive();
                 });
                 last.w.forEach((w, i) => {
                     WOODS[i].setStatic(true).setPosition(w.x, w.y).setAngle(w.a).setVelocity(0, 0).setStatic(w.s);
                 });
             });
+
+            // --- 4. 成功弹窗 (初始隐藏) ---
+            this.winModal = this.add.container(width / 2, height / 2).setDepth(100).setVisible(false).setScale(0);
+            const mBg = this.add.image(0, 0, 'modal');
+            const mTxt = this.add.text(0, -40, '你成功了！', { fontSize: '50px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5);
+            const mBtn = this.add.rectangle(0, 80, 220, 70, 0xd4af37).setInteractive();
+            const mBtnT = this.add.text(0, 80, '再玩一次', { fontSize: '28px', color: '#000', fontStyle: 'bold' }).setOrigin(0.5);
+            this.winModal.add([mBg, mTxt, mBtn, mBtnT]);
+            mBtn.on('pointerdown', () => location.reload());
         }
 
         function checkWin(scene) {
-            // 检查是否所有宝石都隐藏了
-            const allCollected = BOLTS.every(b => !b.gem.visible);
-            if (allCollected) {
+            if (BOLTS.every(b => !b.crys.visible)) {
                 IS_GAMEOVER = true;
-                scene.time.delayedCall(1000, () => {
+                scene.time.delayedCall(800, () => {
                     scene.winModal.setVisible(true);
-                    scene.tweens.add({
-                        targets: scene.winModal,
-                        scale: 1,
-                        duration: 500,
-                        ease: 'Back.easeOut'
-                    });
-                    AudioSynth.play(1200, 'sine', 0.5); // 胜利音效
+                    scene.tweens.add({ targets: scene.winModal, scale: 1, duration: 500, ease: 'Back.easeOut' });
+                    AudioSynth.play(1000, 'sine', 0.5);
                 });
             }
         }
@@ -179,7 +171,7 @@
             HISTORY.push({
                 c: [...CURRENT_COUNTS],
                 w: WOODS.map(s => ({ x: s.x, y: s.y, a: s.angle, s: s.isStatic() })),
-                b: BOLTS.map(b => ({ v: b.gem.visible }))
+                b: BOLTS.map(b => ({ v: b.crys.visible }))
             });
         }
     </script>
