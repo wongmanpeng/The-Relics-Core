@@ -5,41 +5,41 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>文明遗迹：觉醒的守护者</title>
+    <title>文明遗迹：觉醒</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
     <style>
         body {
             margin: 0;
             background: #030803;
-            /* 深暗色背景，防止图片加载前的闪烁 */
             overflow: hidden;
             touch-action: none;
-            font-family: 'serif';
-            /* 使用玛雅风格字体 */
         }
     </style>
 </head>
 
 <body>
     <div id="game-container"></div>
-
     <script>
-        // --- 全局状态与配置 ---
         let HISTORY = [];
         let CURRENT_COUNTS = [0, 0, 0, 0];
         let WOODS = [];
         let BOLTS = [];
-        // 更深邃、更具能量感的图2色调：青、绿、橙、深紫
-        const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff];
-        // 玛雅刻痕符文 (用于石碗装饰)
+        const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff]; // 青、绿、橙、紫
         const RUNES = ['ᚠ', 'ᚢ', 'ᚦ', 'ᚨ'];
 
-        // --- 音效系统 (由于浏览器限制，需点击一次屏幕后生效) ---
-        // 我们继续保留 Web Audio 合成音效，无需 MP3 文件
         const AudioSynth = {
             ctx: null,
-            playHit() { try { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(150, this.ctx.currentTime); o.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.2); g.gain.setValueAtTime(0.3, this.ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2); o.connect(g); g.connect(this.ctx.destination); o.start(); o.stop(this.ctx.currentTime + 0.2); } catch (e) { } },
-            playCollect() { try { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = this.ctx.createOscillator(), g = this.ctx.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(800, this.ctx.currentTime); o.frequency.exponentialRampToValueAtTime(1200, this.ctx.currentTime + 0.1); g.gain.setValueAtTime(0.1, this.ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1); o.connect(g); g.connect(this.ctx.destination); o.start(); o.stop(this.ctx.currentTime + 0.1); } catch (e) { } }
+            play(freq, type = 'sine', dur = 0.1) {
+                try {
+                    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+                    o.type = type; o.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    g.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                    g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + dur);
+                    o.connect(g); g.connect(this.ctx.destination);
+                    o.start(); o.stop(this.ctx.currentTime + dur);
+                } catch (e) { }
+            }
         };
 
         const config = {
@@ -47,118 +47,58 @@
             width: 750,
             height: 1334,
             parent: 'game-container',
-            backgroundColor: '#030803', // 深色背景
-            physics: { default: 'matter', matter: { gravity: { y: 2.8 }, enableSleeping: true, debug: false } },
-            scene: { preload, create }
+            backgroundColor: '#050a05',
+            physics: { default: 'matter', matter: { gravity: { y: 2.5 }, debug: false } },
+            scene: { create },
+            scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }
         };
 
-        const game = new Phaser.Game(config);
+        new Phaser.Game(config);
 
-        // --- 1. 预加载阶段 ---
-        function preload() {
-            // 使用外部合法的高清质感贴图，增强古文明氛围
-            // 背景：神秘玛雅石庙内景图
-            this.load.image('bg_ruins', 'https://labs.phaser.io/assets/tests/background/ruins.png');
-            // 石条纹理：风化、有青苔的玛雅石板
-            this.load.image('stone_tex', 'https://labs.phaser.io/assets/textures/wood-sched.png');
-            // 仪式石碗纹理：粗糙、神秘的岩石材质
-            this.load.image('bowl_tex', 'https://labs.phaser.io/assets/textures/bark.png');
-        }
-
-        // --- 2. 创建阶段 ---
         function create() {
             const { width, height } = this.scale;
             const scene = this;
 
-            // --- A. 生成内置高级纹理 (水晶、核心漩涡) ---
-            generateSpecialTextures(this);
+            // --- 1. 动态纹理绘制（解决图片加载失败问题） ---
+            const g = this.make.graphics({ x: 0, y: 0, add: false });
 
-            // --- B. 场景背景与环境氛围 ---
-            // 绘制带有神秘感的石庙背景图
-            const bg = this.add.image(width / 2, height / 2, 'bg_ruins').setOrigin(0.5);
-            bg.setDisplaySize(width, height); // 自适应屏幕
-            bg.setTint(0x333333); // 调暗背景，突出主体
-
-            // 背景远景石柱影子与青苔线条 (增加深度感)
-            this.add.graphics().fillStyle(0x000000, 0.4).fillRect(0, 0, 120, height);
-            this.add.graphics().fillStyle(0x000000, 0.4).fillRect(width - 120, 0, 120, height);
-
-            // --- C. 顶部 UI：玛雅仪式石碗 ---
-            setupBowls(this);
-
-            // --- D. 核心特效：中心旋转魔法漩涡 ---
-            const vortex = this.add.sprite(width / 2, height / 2 + 50, 'vortex').setDepth(5).setAlpha(0.6);
-            this.tweens.add({ targets: vortex, rotation: Math.PI * 2, duration: 10000, repeat: -1 });
-
-            // --- E. 关卡布局：爱心形物理关卡 (使用图片 Sprite) ---
-            createHeartLevel(this);
-
-            // --- F. 底部 UI：青苔石刻底座与时光回溯按钮 ---
-            setupUndoButton(this);
-        }
-
-        // --- 3. 辅助函数：生成内置纹理 ---
-        function generateSpecialTextures(scene) {
-            const g = scene.make.graphics({ x: 0, y: 0, add: false });
-
-            // 生成核心漩涡纹理
-            g.lineStyle(4, 0x00d2ff, 0.3).strokeCircle(100, 100, 100);
-            g.lineStyle(2, 0x00ff87, 0.2).strokeCircle(100, 100, 80);
-            g.fillStyle(0x000, 0.5).fillCircle(100, 100, 50);
-            g.generateTexture('vortex', 200, 200);
+            // 绘制石板纹理
+            g.fillStyle(0x3d3d3d).fillRect(0, 0, 500, 80);
+            g.lineStyle(4, 0x1a1a1a).strokeRect(2, 2, 496, 76);
+            g.fillStyle(0x222222, 0.5).fillRect(0, 60, 500, 10);
+            g.generateTexture('stone_brick', 500, 80);
             g.clear();
 
-            // 生成通用 3D 切割面宝石基底 (我们将动态调色)
-            g.fillStyle(0xffffff, 0.6); // 基础底色
-            g.fillPoints([
-                { x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 },
-                { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }
-            ], true);
-            g.fillStyle(0xffffff, 0.3); // 高光切割面
-            g.fillPoints([
-                { x: 25, y: 5 }, { x: 40, y: 15 }, { x: 10, y: 15 }
-            ], true);
-            g.generateTexture('crystal_base', 50, 50);
+            // 绘制石碗纹理
+            g.fillStyle(0x222222).fillCircle(65, 65, 65);
+            g.lineStyle(4, 0xd4af37, 0.8).strokeCircle(65, 65, 55);
+            g.generateTexture('stone_bowl', 130, 130);
             g.clear();
-        }
 
-        // --- 4. 辅助函数：构建顶部石碗 UI ---
-        function setupBowls(scene) {
-            this.bowlContainers = [];
+            // 绘制宝石纹理
+            g.fillStyle(0xffffff);
+            g.fillPoints([{ x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 }, { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }], true);
+            g.generateTexture('gem', 50, 50);
+
+            // --- 2. 界面布局 ---
+            // 顶部石碗
             this.texts = [];
+            this.bowlContainers = [];
             COLORS.forEach((color, i) => {
                 const x = 120 + i * 170;
-                const container = scene.add.container(x, 150);
+                const container = this.add.container(x, 150);
+                const glow = this.add.circle(0, 0, 60, color, 0.2);
+                const bowl = this.add.image(0, 0, 'stone_bowl');
+                const rune = this.add.text(0, 40, RUNES[i], { fontSize: '24px', color: '#d4af37' }).setOrigin(0.5);
+                const txt = this.add.text(0, -10, '0', { fontSize: '70px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
 
-                // A. 神秘石碗贴图 (取代色块矩形)
-                const bowl = scene.add.sprite(0, 0, 'bowl_tex').setDisplaySize(130, 130).setTint(0x333333).setDepth(1);
-
-                // 呼吸能量光晕 (碗口)
-                const rimGlow = scene.add.circle(0, 0, 50, color, 0.2).setStrokeStyle(3, color);
-                scene.tweens.add({ targets: rimGlow, alpha: 0.1, duration: 1500, yoyo: true, repeat: -1 });
-
-                // 金色玛雅符文刻痕
-                const rune = scene.add.text(0, 40, RUNES[i], { fontSize: '28px', color: '#d4af37', fontStyle: 'bold', alpha: 0.6 }).setOrigin(0.5).setDepth(2);
-
-                // 计数文字 (大号，金色描边，带阴影)
-                const text = scene.add.text(0, -10, '0', {
-                    fontSize: '70px',
-                    color: '#ffffff',
-                    fontStyle: 'bold',
-                    stroke: '#000',
-                    strokeThickness: 6
-                }).setOrigin(0.5).setDepth(3);
-                text.setShadow(2, 2, '#000', 2, true, true);
-
-                container.add([rimGlow, bowl, rune, text]);
+                container.add([glow, bowl, rune, txt]);
+                this.texts.push(txt);
                 this.bowlContainers.push(container);
-                this.texts.push(text);
+                this.tweens.add({ targets: glow, alpha: 0.1, scale: 1.1, duration: 1500, yoyo: true, repeat: -1 });
             });
-        }
 
-        // --- 5. 辅助函数：构建爱心形物理关卡 ---
-        function createHeartLevel(scene) {
-            // 关卡布局
+            // 物理关卡（爱心布局）
             const layout = [
                 { x: 230, y: 550, angle: -35, w: 320, c: 0 },
                 { x: 520, y: 550, angle: 35, w: 320, c: 0 },
@@ -168,124 +108,69 @@
             ];
 
             layout.forEach((data, i) => {
-                const { x, y, angle, w, c } = data;
-                const color = COLORS[c];
-
-                // A. 玛雅石板物理对象 (取代色块矩形)
-                // 我们创建一个带有 'stone_tex' 质感的 Sprite
-                let stone = scene.matter.add.sprite(x, y, 'stone_tex');
-                stone.setDisplaySize(w, 75); // 石板高度
-                stone.setStatic(true); // 钉在空中
-                stone.setAngle(angle);
-                stone.setFriction(0.2); // 增加摩擦力，掉落更有质感
-                stone.setTint(0x555555); // 调暗质感
+                // 创建石板
+                let stone = this.matter.add.sprite(data.x, data.y, 'stone_brick');
+                stone.setDisplaySize(data.w, 80).setStatic(true).setAngle(data.angle);
                 WOODS.push(stone);
 
-                // B. 水晶螺栓 (取代圆圈)
-                // 我们使用 3D 切割宝石图片并动态调色
-                let crystal = scene.add.sprite(x, y, 'crystal_base')
-                    .setInteractive()
-                    .setDepth(10)
-                    .setDisplaySize(60, 60)
-                    .setTint(color); // 动态应用对应的能量颜色
+                // 创建水晶
+                let glow = this.add.circle(data.x, data.y, 65, COLORS[data.c], 0.2);
+                let gem = this.add.image(data.x, data.y, 'gem').setTint(COLORS[data.c]).setScale(1.2).setInteractive();
 
-                // 水晶螺栓底部的彩虹能量光晕
-                let glow = scene.add.circle(x, y, 70, color, 0.25);
-
-                // 给水晶核心添加一个符文符号
-                let runeSymbol = scene.add.text(x, y, RUNES[c], { fontSize: '24px', color: '#fff', alpha: 0.7 }).setOrigin(0.5).setDepth(11);
-
-                // 增加宝石呼吸和发光 Tween
-                scene.tweens.add({ targets: [crystal, glow, runeSymbol], scale: 1.15, duration: 800 + i * 150, yoyo: true, repeat: -1 });
-
-                // --- 螺栓提取逻辑 (保留原有时光回溯和物理系统) ---
-                crystal.on('pointerdown', () => {
+                gem.on('pointerdown', () => {
                     saveSnapshot();
-                    AudioSynth.playCollect();
+                    AudioSynth.play(800 + data.c * 100);
 
-                    crystal.setVisible(false).disableInteractive();
+                    gem.setVisible(false).disableInteractive();
                     glow.setVisible(false);
-                    runeSymbol.setVisible(false);
-                    scene.cameras.main.shake(100, 0.01);
 
-                    // 罐子（石碗）弹动效果
-                    scene.tweens.add({ targets: this.bowlContainers[c], scale: 1.25, duration: 100, yoyo: true, ease: 'Back.easeOut' });
-                    // 爆亮符文特效
-                    const bowlRune = this.bowlContainers[c].getAt(2);
-                    bowlRune.setAlpha(1);
-                    scene.tweens.add({ targets: bowlRune, alpha: 0.6, duration: 500 });
+                    // 更新数字
+                    CURRENT_COUNTS[data.c]++;
+                    this.texts[data.c].setText(CURRENT_COUNTS[data.c]);
 
-                    // 计数逻辑 (满3个归零)
-                    CURRENT_COUNTS[c]++;
-                    if (CURRENT_COUNTS[c] >= 3) CURRENT_COUNTS[c] = 0;
-                    this.texts[c].setText(CURRENT_COUNTS[c]);
+                    // 动画反馈
+                    scene.tweens.add({ targets: this.bowlContainers[data.c], scale: 1.2, duration: 100, yoyo: true });
 
-                    // 解除石板锁定，释放重力
+                    // 石板掉落
                     stone.setStatic(false);
+                    AudioSynth.play(150, 'triangle', 0.2);
+                });
+                BOLTS.push({ gem, glow });
+            });
+
+            // 撤回按钮
+            const undoBtn = this.add.container(width / 2, height - 150);
+            const uBtn = this.add.circle(0, 0, 80, 0x222).setStrokeStyle(4, 0xd4af37).setInteractive();
+            undoBtn.add([uBtn, this.add.text(0, 0, 'UNDO', { fontSize: '32px', color: '#d4af37' }).setOrigin(0.5)]);
+
+            uBtn.on('pointerdown', () => {
+                if (HISTORY.length === 0) return;
+                const last = HISTORY.pop();
+
+                CURRENT_COUNTS = [...last.c];
+                CURRENT_COUNTS.forEach((n, i) => this.texts[i].setText(n));
+
+                last.b.forEach((b, i) => {
+                    BOLTS[i].gem.setVisible(b.v);
+                    BOLTS[i].glow.setVisible(b.v);
+                    if (b.v) BOLTS[i].gem.setInteractive();
                 });
 
-                BOLTS.push({ obj: crystal, glow, runeSymbol, cIdx: c });
+                last.w.forEach((w, i) => {
+                    WOODS[i].setStatic(true);
+                    WOODS[i].setPosition(w.x, w.y);
+                    WOODS[i].setAngle(w.a);
+                    WOODS[i].setVelocity(0, 0);
+                    WOODS[i].setStatic(w.s);
+                });
             });
         }
 
-        // --- 6. 辅助函数：构建底部 UI ---
-        function setupUndoButton(scene) {
-            const { width, height } = scene.scale;
-            // 绘制时光回溯按钮石刻底座
-            scene.add.graphics().fillGradientStyle(0x000, 0x000, 0x0a1a0a, 0x0a1a0a, 0.4).fillRect(0, height - 300, width, 300);
-            scene.add.graphics().lineStyle(4, 0x1a1a1a).strokeRect(100, height - 280, width - 200, 200);
-
-            const undoBtn = scene.add.container(width / 2, height - 160);
-            const uCircle = scene.add.circle(0, 0, 95, 0xd4af37, 0.15).setStrokeStyle(6, 0xd4af37).setInteractive();
-            const uText = scene.add.text(0, 0, '撤回 UNDO', { fontSize: '38px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5);
-            undoBtn.add([uCircle, uText]);
-
-            uCircle.on('pointerdown', () => {
-                doUndo(scene);
-                uCircle.setScale(0.85); // 点击反馈
-                // 由于浏览器安全策略，这里不需要每次都 init ctx
-            });
-            uCircle.on('pointerup', () => uCircle.setScale(1));
-        }
-
-        // --- 时光回溯堆栈逻辑 (原封不动保留) ---
         function saveSnapshot() {
             HISTORY.push({
                 c: [...CURRENT_COUNTS],
-                w: WOODS.map(item => ({ x: item.x, y: item.y, a: item.angle, s: item.isStatic() })),
-                b: BOLTS.map(item => ({ v: item.obj.visible, i: (item.obj.input && item.obj.input.enabled) }))
-            });
-        }
-
-        function doUndo(scene) {
-            if (HISTORY.length === 0) return;
-            const last = HISTORY.pop();
-            CURRENT_COUNTS = [...last.c];
-            CURRENT_COUNTS.forEach((n, i) => scene.texts[i].setText(n));
-
-            last.b.forEach((data, i) => {
-                BOLTS[i].obj.setVisible(data.v);
-                BOLTS[i].glow.setVisible(data.v);
-                BOLTS[i].runeSymbol.setVisible(data.v);
-                if (data.i) BOLTS[i].obj.setInteractive(); else BOLTS[i].obj.disableInteractive();
-            });
-
-            last.w.forEach((data, i) => {
-                const stone = WOODS[i];
-                stone.setStatic(true);
-                stone.setPosition(data.x, data.y);
-                stone.setAngle(data.a);
-                stone.setVelocity(0, 0);
-                stone.setAngularVelocity(0);
-                stone.setStatic(data.s);
-            });
-        }
-
-        function update() {
-            // 物理精灵同步 (使用图片 Sprite 后，需要强制同步非 Body 属性)
-            WOODS.forEach(w => {
-                // Phaser Matter 绑定gameObject后会自动处理位置同步，
-                // 但我们最好强制让 sprite 居中其物理 Body，防止由于中心点偏移导致的卡顿
+                w: WOODS.map(s => ({ x: s.x, y: s.y, a: s.angle, s: s.isStatic() })),
+                b: BOLTS.map(b => ({ v: b.gem.visible }))
             });
         }
     </script>
