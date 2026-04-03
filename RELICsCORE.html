@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>文明遗迹：觉醒</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+            touch-action: none; /* 禁用手机浏览器默认触摸行为 */
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+
+<script>
+/**
+ * 游戏配置：自适应屏幕，开启物理引擎
+ */
+const config = {
+    type: Phaser.AUTO,
+    width: 750,
+    height: 1334, // 16:9 竖屏布局
+    parent: 'game-container',
+    backgroundColor: '#1a1a1a',
+    physics: {
+        default: 'matter',
+        matter: {
+            gravity: { y: 1.5 }, // 增加重力感
+            enableSleeping: true, // 优化性能
+            debug: false // 调试时可设为 true
+        }
+    },
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    },
+    scale: {
+        mode: Phaser.Scale.FIT, // 自动缩放适配所有屏幕
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    }
+};
+
+const game = new Phaser.Game(config);
+
+// 全局变量
+let historyStack = [];
+let crystalCounts = [0, 0, 0, 0]; // 红、绿、蓝、黄水晶计数
+let bowlTexts = [];
+let bowlGroup;
+let matterSprites = []; // 存储所有带有物理的石条/木条 Sprite
+let boltSprites = []; // 存储所有螺栓/水晶 Sprite
+const COLORS = [0xff4757, 0x2ed573, 0x1e90ff, 0xffa502]; // 亮丽的水晶颜色
+const MAX_BOWL_CAPACITY = 3;
+
+// 音效生成器 (使用 Web Audio API，无需外部文件)
+const AudioSynth = {
+    ctx: null,
+    playHit() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle'; // 三角波，声音较闷
+        osc.frequency.setValueAtTime(150, this.ctx.currentTime); // 起始频率
+        osc.frequency.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3); // 快速降频
+        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.3);
+    },
+    playCollect() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine'; // 正弦波，声音清脆
+        osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1200, this.ctx.currentTime + 0.1); // 升频
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.1);
+    }
+};
+
+/**
+ * 1. 预加载：加载有质感的背景和材质图
+ */
+function preload() {
+    // 使用公开的免版权质感贴图，增强古文明氛围
+    // 背景：神秘石庙内景
+    this.load.image('bg_ruins', 'https://labs.phaser.io/assets/tests/background/ruins.png');
+    // 石板/木条质感
+    this.load.image('wood_tex', 'https://labs.phaser.io/assets/textures/wood-sched.png');
+    // 仪式石碗质感
+    this.load.image('bowl_tex', 'https://labs.phaser.io/assets/textures/bark.png');
+}
+
+/**
+ * 2. 创建：构建游戏场景和 UI
+ */
+function create() {
+    const { width, height } = this.scale;
+
+    // A. 绘制神秘背景
+    const bg = this.add.image(width / 2, height / 2, 'bg_ruins').setOrigin(0.5);
+    bg.setDisplaySize(width, height); // 撑满屏幕
+    bg.setTint(0x444444); // 调暗背景，突出主体
+
+    // B. 初始化顶部仪式石碗 (UI)
+    setupBowls(this);
+
+    // C. 构建核心：爱心形状的玛雅石条布局 (开启物理)
+    createHeartLevel(this);
+
+    // D. 底部 UI：时光回溯按钮
+    const undoBtn = this.add.container(width / 2, height - 120);
+    const btnCircle = this.add.circle(0, 0, 70, 0x4b4b4b).setInteractive();
+    btnCircle.setStrokeStyle(4, 0xd4af37); // 金色边框，更有质感
+    undoBtn.add([btnCircle, this.add.text(-40, -15, '撤回', { fontSize: '32px', color: '#fff', fontStyle: 'bold' })]);
+
+    // 长按逻辑实现
+    let undoTimer;
+    btnCircle.on('pointerdown', () => {
+        performUndo(this); // 先执行一次
+        undoTimer = setInterval(() => performUndo(this), 150); // 随后长按每150ms回退一步
+    });
+    btnCircle.on('pointerup', () => clearInterval(undoTimer));
+    btnCircle.on('pointerout', () => clearInterval(undoTimer));
+
+    // E. 物理边界检测
+    this.matter.world.setBounds(0, -200, width, height + 400); // 允许物体掉到屏幕外
+}
+
+/**
+ * 构建顶部石碗 UI
+ */
+function setupBowls(scene) {
+    const startX = 120;
+    const y = 160;
+    bowlGroup = scene.add.group();
+
+    COLORS.forEach((color, i) => {
+        const x = startX + i * 170;
+        const container = scene.add.container(x, y);
+
+        // 使用 Bark 纹理生成有质感的石碗
+        const bowl = scene.add.image(0, 0, 'bowl_tex').setDisplaySize(120, 120).setTint(0x333333);
+        
+        // 碗口发光圈，对应水晶颜色
+        const rim = scene.add.circle(0, 0, 50, color, 0.2).setStrokeStyle(3, color);
+
+        // 计数文字，金色，带阴影
+        const text = scene.add.text(-20, -20, '0', { 
+            fontSize: '48px', 
+            color: '#d4af37', 
+            fontStyle: 'bold'
+        });
+        text.setShadow(2, 2, '#000', 2, true, true);
+
+        container.add([bowl, rim, text]);
+        bowlTexts.push(text);
+        bowlGroup.add(container);
+    });
+}
+
+/**
+ * 构建爱心形物理关卡
+ */
+function createHeartLevel(scene) {
+    const centerX = scene.scale.width / 2;
+    const centerY = scene.scale.height / 2 + 100;
+
+    // 每一层石条及其螺栓位置 (这里是简化的逻辑示例)
+    // data: [x, y, angle, length, colorIdx]
+    const levelData = [
+        [centerX, centerY, 0, 400, 2], // 底部横条 (蓝)
+        [centerX - 100, centerY - 80, -45, 250, 0], // 左下斜条 (红)
+        [centerX + 100, centerY - 80, 45, 250, 1], // 右下斜条 (绿)
+        [centerX - 50, centerY - 150, 0, 180, 3], // 左上横条 (黄)
+        [centerX + 50, centerY - 150, 0, 180, 2]  // 右上横条 (蓝)
+    ];
+
+    levelData.forEach((data, i) => {
+        const [x, y, angle, length, colorIdx] = data;
+        const color = COLORS[colorIdx];
+
+        // 1. 创建带有质感的石条 Sprite (开启物理)
+        const stoneSprite = scene.add.tileSprite(x, y, length, 60, 'wood_tex').setTint(0x555555);
+        stoneSprite.tileScaleX = 0.5; // 缩放纹理
+        
+        // 绑定 Matter 物理，初始为 Static (钉在空中)
+        const stoneBody = scene.matter.add.gameObject(stoneSprite, {
+            shape: 'rectangle',
+            isStatic: true,
+            friction: 0.2,
+            chamfer: { radius: 10 } // 圆角
+        });
+        scene.matter.body.setAngle(stoneBody.body, Phaser.Math.DegToRad(angle));
+        matterSprites.push(stoneSprite);
+
+        // 2. 水晶螺栓：锁定石条
+        const bolt = scene.add.circle(x, y, 25, color)
+            .setInteractive()
+            .setStrokeStyle(4, 0xffffff);
+        bolt.colorIdx = colorIdx;
+        bolt.woodRef = stoneSprite; // 绑定它所锁定的石条
+        
+        // 增加发光效果 (Tween)
+        scene.tweens.add({
+            targets: bolt,
+            alpha: 0.5,
+            duration: 800 + i * 100,
+            yoyo: true,
+            repeat: -1
+        });
+
+        bolt.on('pointerdown', () => {
+            handleBoltClick(scene, bolt);
+        });
+        boltSprites.push(bolt);
+    });
+}
+
+/**
+ * 核心逻辑：提取水晶
+ */
+function handleBoltClick(scene, bolt) {
+    // 1. 记录动作前的干净状态（用于撤回）
+    saveGameState(scene);
+
+    // 2. 触觉反馈 ( navigator.vibrate )
+    if (navigator.vibrate) navigator.vibrate(30);
+
+    // 3. 声音反馈 (提取声音)
+    AudioSynth.playCollect();
+
+    // 4. 螺栓消失，物理引擎让石条掉落
+    bolt.setVisible(false);
+    bolt.disableInteractive();
+    
+    // 释放石条的锁定状态 (Static -> Dynamic)
+    const stoneSprite = bolt.woodRef;
+    scene.matter.setStatic(stoneSprite.body, false);
+    scene.matter.body.setVelocity(stoneSprite.body, { x: 0, y: 5 }); // 初始向下给点力
+
+    // 播放掉落声音 (咚)
+    AudioSynth.playHit();
+
+    // 5. 更新顶部石碗计数
+    updateBowlCount(bolt.colorIdx);
+}
+
+/**
+ * 更新罐子计数
+ */
+function updateBowlCount(colorIdx) {
+    crystalCounts[colorIdx]++;
+    let count = crystalCounts[colorIdx];
+
+    // 换罐子逻辑
+    if (count >= MAX_BOWL_CAPACITY) {
+        count = 0; // 重置
+        crystalCounts[colorIdx] = 0;
+        // 可以在这里加上罐子闪烁淡出的特效
+    }
+    bowlTexts[colorIdx].setText(count);
+}
+
+/**
+ * 保存当前游戏状态到堆栈（用于时光回溯）
+ */
+function saveGameState(scene) {
+    // 深度拷贝当前所有物体的状态
+    const state = {
+        counts: [...crystalCounts], // 水晶计数
+        bolts: boltSprites.map(b => ({ visible: b.visible })), // 螺栓可见性
+        woods: matterSprites.map(s => ({
+            x: s.body.position.x,
+            y: s.body.position.y,
+            angle: s.body.angle,
+            isStatic: s.body.isStatic
+        })) // 石条位置和锁定状态
+    };
+    historyStack.push(state);
+}
+
+/**
+ * 执行时光回溯
+ */
+function performUndo(scene) {
+    if (historyStack.length === 0) return;
+
+    // 1. 弹出上一个状态
+    const lastState = historyStack.pop();
+
+    // 2. 声音反馈
+    AudioSynth.playCollect(); // 使用清脆声
+
+    // 3. 恢复计数
+    crystalCounts = [...lastState.counts];
+    crystalCounts.forEach((count, i) => bowlTexts[i].setText(count));
+
+    // 4. 恢复螺栓
+    lastState.bolts.forEach((state, i) => {
+        const bolt = boltSprites[i];
+        bolt.setVisible(state.visible);
+        if (state.visible) bolt.setInteractive();
+        else bolt.disableInteractive();
+    });
+
+    // 5. 恢复石条物理状态 (强制复位)
+    lastState.woods.forEach((state, i) => {
+        const stoneSprite = matterSprites[i];
+        // 强制把物体拉回原点并定住
+        scene.matter.body.setPosition(stoneSprite.body, { x: state.x, y: state.y });
+        scene.matter.body.setAngle(stoneSprite.body, state.angle);
+        scene.matter.body.setVelocity(stoneSprite.body, { x: 0, y: 0 }); // 速度归零
+        scene.matter.body.setAngularVelocity(stoneSprite.body, 0); // 旋转速度归零
+        scene.matter.setStatic(stoneSprite.body, state.isStatic); // 恢复 Static 状态
+    });
+}
+
+function update() {
+    // 物理引擎自动处理掉落，不需要在每一帧更新代码
+}
+</script>
+</body>
+</html>
