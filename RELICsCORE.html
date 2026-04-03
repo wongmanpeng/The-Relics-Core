@@ -5,75 +5,41 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>文明遗迹：觉醒的全平台版</title>
+    <title>文明遗迹：觉醒 - 终极版</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
     <style>
         body {
             margin: 0;
-            padding: 0;
-            background-color: #030803;
-            /* 深暗色背景 */
+            background: #030803;
             overflow: hidden;
             touch-action: none;
-            /* 禁用手机浏览器默认触摸行为 */
-            font-family: 'serif';
-            /* 使用带有古文明感的字体 */
-        }
-
-        #game-container {
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
         }
     </style>
 </head>
 
 <body>
     <div id="game-container"></div>
-
     <script>
-        // --- 全局状态 ---
         let HISTORY = [];
-        let CURRENT_COUNTS = [0, 0, 0, 0]; // 蓝, 绿, 黄, 紫水晶计数
+        let CURRENT_COUNTS = [0, 0, 0, 0];
         let WOODS = [];
         let BOLTS = [];
-        // 更深邃、更具能量感的色调：青、绿、橙、深紫
+        let IS_GAMEOVER = false;
         const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff];
-        // 玛雅刻痕符文 (用于石碗装饰)
         const RUNES = ['ᚠ', 'ᚢ', 'ᚦ', 'ᚨ'];
 
-        // --- 音效生成器 (使用 Web Audio API，无需外部文件) ---
         const AudioSynth = {
             ctx: null,
-            playHit() {
-                if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
-                osc.type = 'triangle'; // 三角波，声音较闷
-                osc.frequency.setValueAtTime(150, this.ctx.currentTime); // 起始频率
-                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.3); // 快速降频
-                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
-                osc.connect(gain);
-                gain.connect(this.ctx.destination);
-                osc.start();
-                osc.stop(this.ctx.currentTime + 0.3);
-            },
-            playCollect() {
-                if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
-                osc.type = 'sine'; // 正弦波，声音清脆
-                osc.frequency.setValueAtTime(800, this.ctx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(1200, this.ctx.currentTime + 0.1); // 升频
-                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
-                osc.connect(gain);
-                gain.connect(this.ctx.destination);
-                osc.start();
-                osc.stop(this.ctx.currentTime + 0.1);
+            play(freq, type = 'sine', dur = 0.1) {
+                try {
+                    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+                    o.type = type; o.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    g.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                    g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + dur);
+                    o.connect(g); g.connect(this.ctx.destination);
+                    o.start(); o.stop(this.ctx.currentTime + dur);
+                } catch (e) { }
             }
         };
 
@@ -82,130 +48,48 @@
             width: 750,
             height: 1334,
             parent: 'game-container',
-            backgroundColor: '#030803',
-            physics: {
-                default: 'matter',
-                matter: {
-                    gravity: { y: 2.8 }, // 增加重力感，掉落更爽快
-                    enableSleeping: true,
-                    debug: false
-                }
-            },
-            scene: { preload, create }
+            backgroundColor: '#050a05',
+            physics: { default: 'matter', matter: { gravity: { y: 2.8 }, debug: false } },
+            scene: { create },
+            scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }
         };
 
-        const game = new Phaser.Game(config);
+        new Phaser.Game(config);
 
-        /**
-         * 1. 预加载：加载有质感的背景和材质图
-         */
-        function preload() {
-            // 使用公开贴图，增强古文明氛围
-            // 背景：神秘石庙内景图
-            this.load.image('bg_ruins', 'https://labs.phaser.io/assets/tests/background/ruins.png');
-            // 石板纹理：风化、有青苔的岩石材质
-            this.load.image('stone_tex', 'https://labs.phaser.io/assets/textures/wood-sched.png');
-            // 仪式石碗纹理：粗糙、风化的岩石材质
-            this.load.image('bowl_tex', 'https://labs.phaser.io/assets/textures/bark.png');
-        }
-
-        /**
-         * 2. 创建：构建场景和 UI
-         */
         function create() {
             const { width, height } = this.scale;
             const scene = this;
 
-            // --- A. 生成内置纹理 (宝石、漩涡) ---
-            generateSpecialTextures(this);
-
-            // --- B. 背景环境 ---
-            const bg = this.add.image(width / 2, height / 2, 'bg_ruins').setOrigin(0.5);
-            bg.setDisplaySize(width, height); // 撑满屏幕
-            bg.setTint(0x333333); // 调暗背景，突出主体
-
-            // 背景远景石柱影子与青苔线条 (增加深度感)
-            this.add.graphics().fillStyle(0x000000, 0.4).fillRect(0, 0, 120, height);
-            this.add.graphics().fillStyle(0x000000, 0.4).fillRect(width - 120, 0, 120, height);
-
-            // --- C. 顶部 UI：玛雅仪式石碗 ---
-            setupBowls(this);
-
-            // --- D. 核心特效：中心旋转魔法漩涡 ---
-            const vortex = this.add.sprite(width / 2, height / 2 + 50, 'vortex').setDepth(5).setAlpha(0.6);
-            this.tweens.add({ targets: vortex, rotation: Math.PI * 2, duration: 10000, repeat: -1 });
-
-            // --- E. 关卡布局：爱心形物理关卡 (使用图片 Sprite) ---
-            createHeartLevel(this);
-
-            // --- F. 底部 UI：时光回溯按钮与石刻底座 ---
-            setupUndoButton(this);
-        }
-
-        // --- 辅助函数区 ---
-
-        /**
-         * 生成宝石、漩涡纹理
-         */
-        function generateSpecialTextures(scene) {
-            const g = scene.make.graphics({ x: 0, y: 0, add: false });
-
-            // 生成核心漩涡纹理
-            g.lineStyle(4, 0x00d2ff, 0.3).strokeCircle(100, 100, 100);
-            g.lineStyle(2, 0x00ff87, 0.2).strokeCircle(100, 100, 80);
-            g.fillStyle(0x000, 0.5).fillCircle(100, 100, 50);
-            g.generateTexture('vortex', 200, 200);
+            // --- 1. 纹理生成 ---
+            const g = this.make.graphics({ x: 0, y: 0, add: false });
+            // 石板
+            g.fillStyle(0x3d3d3d).fillRect(0, 0, 500, 80);
+            g.lineStyle(4, 0x1a1a1a).strokeRect(2, 2, 496, 76);
+            g.generateTexture('stone_brick', 500, 80);
             g.clear();
+            // 成功窗口背景
+            g.fillStyle(0x1a1a1a, 0.95).fillRoundedRect(0, 0, 500, 300, 20);
+            g.lineStyle(6, 0xd4af37).strokeRoundedRect(3, 3, 494, 294, 20);
+            g.generateTexture('modal_bg', 500, 300);
+            g.clear();
+            // 宝石
+            g.fillStyle(0xffffff).fillPoints([{ x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 }, { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }], true);
+            g.generateTexture('gem', 50, 50);
 
-            // 生成高级 3D 切割面宝石基底 (将动态调色)
-            g.fillStyle(0xffffff, 0.6); // 基础底色
-            g.fillPoints([
-                { x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 },
-                { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }
-            ], true);
-            g.fillStyle(0xffffff, 0.3); // 高光切割面
-            g.fillPoints([
-                { x: 25, y: 5 }, { x: 40, y: 15 }, { x: 10, y: 15 }
-            ], true);
-            g.generateTexture('crystal_base', 50, 50);
-        }
-
-        /**
-         * 构建顶部石碗 UI
-         */
-        function setupBowls(scene) {
-            this.bowlContainers = [];
+            // --- 2. 界面布局 ---
             this.texts = [];
+            this.bowlContainers = [];
             COLORS.forEach((color, i) => {
                 const x = 120 + i * 170;
-                const container = scene.add.container(x, 150);
-
-                // 罐子底纹能量光晕
-                const glow = this.add.circle(0, 0, 60, color, 0.15);
-                this.tweens.add({ targets: glow, alpha: 0.05, duration: 1500, yoyo: true, repeat: -1 });
-
-                // 粗糙岩石石碗 Sprite (加载图片纹理)
-                const bowl = scene.add.sprite(0, 0, 'bowl_tex').setDisplaySize(130, 130).setTint(0x333333).setDepth(1);
-
-                // 符文装饰刻痕
-                const rune = scene.add.text(0, 40, RUNES[i], { fontSize: '24px', color: '#d4af37', fontStyle: 'bold', alpha: 0.6 }).setOrigin(0.5).setDepth(2);
-
-                // 计数文字，金色，带阴影与描边
-                const t = scene.add.text(0, -10, '0', {
-                    fontSize: '70px', color: '#ffffff', fontStyle: 'bold', stroke: '#000', strokeThickness: 6
-                }).setOrigin(0.5).setDepth(3);
-                t.setShadow(2, 2, '#000', 2, true, true);
-
-                container.add([glow, bowl, rune, t]);
+                const container = this.add.container(x, 150);
+                const glow = this.add.circle(0, 0, 65, color, 0.2);
+                const txt = this.add.text(0, -10, '0', { fontSize: '70px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+                container.add([glow, txt]);
+                this.texts.push(txt);
                 this.bowlContainers.push(container);
-                this.texts.push(t);
             });
-        }
 
-        /**
-         * 构建爱心形关卡布局
-         */
-        function createHeartLevel(scene) {
+            // 物理关卡
             const layout = [
                 { x: 230, y: 550, angle: -35, w: 320, c: 0 },
                 { x: 520, y: 550, angle: 35, w: 320, c: 0 },
@@ -215,121 +99,87 @@
             ];
 
             layout.forEach((data, i) => {
-                const { x, y, angle, w, c } = data;
-                const color = COLORS[c];
+                let stone = this.matter.add.sprite(data.x, data.y, 'stone_brick');
+                stone.setDisplaySize(data.w, 80).setStatic(true).setAngle(data.angle);
+                WOODS.push(stone);
 
-                // --- A. 玛雅石板物理对象 (Sprite 物理同步) ---
-                // 我们创建一个带有岩石质感的石条 Sprite
-                let stoneSprite = scene.matter.add.sprite(x, y, 'stone_tex');
-                stoneSprite.setDisplaySize(w, 75); // 增加厚度
-                stoneSprite.setStatic(true); // 钉在空中
-                stoneSprite.setAngle(angle);
-                stoneSprite.setFriction(0.2); // 增加摩擦力，掉落更有冲击感
-                stoneSprite.setTint(0x555555); // 调暗质感
+                let glow = this.add.circle(data.x, data.y, 65, COLORS[data.c], 0.2);
+                let gem = this.add.image(data.x, data.y, 'gem').setTint(COLORS[data.c]).setScale(1.2).setInteractive();
 
-                WOODS.push(stoneSprite);
-
-                // 风化刻痕文字 (石板上)
-                let runeStr = "◈ ━━ ◈".repeat(Math.round(w / 150));
-                scene.add.text(x, y, runeStr, { fontSize: '20px', color: '#1a1a1a', alpha: 0.8 }).setOrigin(0.5).setRotation(Phaser.Math.DegToRad(angle)).setDepth(9);
-
-                // --- B. 螺栓：3D 切割水晶宝石取代圆圈 ---
-                let crystal = scene.add.sprite(x, y, 'crystal_base')
-                    .setInteractive()
-                    .setDepth(10)
-                    .setDisplaySize(60, 60)
-                    .setTint(color); // 应用宝石能量颜色
-
-                // 水晶底部的彩虹能量光晕
-                let glow = scene.add.circle(x, y, 70, color, 0.25);
-
-                // 增加宝石呼吸Tween
-                scene.tweens.add({ targets: [crystal, glow], scale: 1.15, duration: 800 + i * 150, yoyo: true, repeat: -1 });
-
-                // --- 水晶提取逻辑 ---
-                crystal.on('pointerdown', () => {
-                    saveGameState(scene);
-                    AudioSynth.playCollect();
-
-                    // 水晶消失效果
-                    crystal.setVisible(false).disableInteractive();
+                gem.on('pointerdown', () => {
+                    if (IS_GAMEOVER) return;
+                    saveSnapshot();
+                    AudioSynth.play(800 + data.c * 100);
+                    gem.setVisible(false).disableInteractive();
                     glow.setVisible(false);
 
-                    // 界面反馈：画面震动，音效
-                    scene.cameras.main.shake(100, 0.015);
-                    AudioSynth.playHit();
+                    CURRENT_COUNTS[data.c]++;
+                    this.texts[data.c].setText(CURRENT_COUNTS[data.c]);
+                    stone.setStatic(false);
 
-                    // 仪式石碗效果：弹动与符文爆亮
-                    scene.tweens.add({ targets: this.bowlContainers[c], scale: 1.2, duration: 100, yoyo: true, ease: 'Back.easeOut' });
-                    const bowlRune = this.bowlContainers[c].getAt(2);
-                    bowlRune.setAlpha(1);
-                    scene.tweens.add({ targets: bowlRune, alpha: 0.6, duration: 500 });
-
-                    // 计数逻辑 (满3个归零)
-                    CURRENT_COUNTS[c]++;
-                    if (CURRENT_COUNTS[c] >= 3) CURRENT_COUNTS[c] = 0;
-                    this.texts[c].setText(CURRENT_COUNTS[c]);
-
-                    // 解除物理锁定，让石块飞掉
-                    stoneSprite.setStatic(false);
+                    checkWin(scene); // 核心：检查是否胜利
                 });
+                BOLTS.push({ gem, glow });
+            });
 
-                BOLTS.push({ crystal, glow, cIdx: c });
+            // --- 3. 成功弹窗系统 ---
+            this.winModal = this.add.container(width / 2, height / 2).setDepth(100).setVisible(false).setScale(0);
+            const modalBg = this.add.image(0, 0, 'modal_bg');
+            const winTitle = this.add.text(0, -50, '你成功了！', { fontSize: '50px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5);
+            const winSub = this.add.text(0, 30, '古文明守护者已觉醒', { fontSize: '28px', color: '#ffffff', alpha: 0.8 }).setOrigin(0.5);
+
+            // 重启按钮
+            const restartBtn = this.add.rectangle(0, 100, 200, 60, 0xd4af37).setInteractive();
+            const restartTxt = this.add.text(0, 100, '再玩一次', { fontSize: '24px', color: '#000', fontStyle: 'bold' }).setOrigin(0.5);
+
+            this.winModal.add([modalBg, winTitle, winSub, restartBtn, restartTxt]);
+
+            restartBtn.on('pointerdown', () => { location.reload(); });
+
+            // 撤回按钮
+            const undoBtn = this.add.container(width / 2, height - 150);
+            const uBtn = this.add.circle(0, 0, 80, 0x222).setStrokeStyle(4, 0xd4af37).setInteractive();
+            undoBtn.add([uBtn, this.add.text(0, 0, 'UNDO', { fontSize: '32px', color: '#d4af37' }).setOrigin(0.5)]);
+
+            uBtn.on('pointerdown', () => {
+                if (HISTORY.length === 0 || IS_GAMEOVER) return;
+                const last = HISTORY.pop();
+                CURRENT_COUNTS = [...last.c];
+                CURRENT_COUNTS.forEach((n, i) => this.texts[i].setText(n));
+                last.b.forEach((b, i) => {
+                    BOLTS[i].gem.setVisible(b.v);
+                    BOLTS[i].glow.setVisible(b.v);
+                    if (b.v) BOLTS[i].gem.setInteractive();
+                });
+                last.w.forEach((w, i) => {
+                    WOODS[i].setStatic(true).setPosition(w.x, w.y).setAngle(w.a).setVelocity(0, 0).setStatic(w.s);
+                });
             });
         }
 
-        /**
-         * 构建底部 UI：撤回按钮
-         */
-        function setupUndoButton(scene) {
-            const { width, height } = scene.scale;
-            // 绘制玛雅石刻底座
-            scene.add.graphics().fillGradientStyle(0x000, 0x000, 0x0a1a0a, 0x0a1a0a, 0.4).fillRect(0, height - 300, width, 300);
-            scene.add.graphics().lineStyle(4, 0x1a1a1a).strokeRect(100, height - 280, width - 200, 200);
-
-            const undoBtn = scene.add.container(width / 2, height - 160);
-            const uCircle = scene.add.circle(0, 0, 95, 0xd4af37, 0.15).setStrokeStyle(6, 0xd4af37).setInteractive();
-            const uText = scene.add.text(0, 0, '撤回 UNDO', { fontSize: '38px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5);
-            undoBtn.add([uCircle, uText]);
-
-            uCircle.on('pointerdown', () => {
-                doUndo(scene);
-                uCircle.setScale(0.85); // 撤回反馈
-                AudioSynth.playCollect();
-            });
-            uCircle.on('pointerup', () => uCircle.setScale(1));
+        function checkWin(scene) {
+            // 检查是否所有宝石都隐藏了
+            const allCollected = BOLTS.every(b => !b.gem.visible);
+            if (allCollected) {
+                IS_GAMEOVER = true;
+                scene.time.delayedCall(1000, () => {
+                    scene.winModal.setVisible(true);
+                    scene.tweens.add({
+                        targets: scene.winModal,
+                        scale: 1,
+                        duration: 500,
+                        ease: 'Back.easeOut'
+                    });
+                    AudioSynth.play(1200, 'sine', 0.5); // 胜利音效
+                });
+            }
         }
 
-        // --- 时光回溯（ Undo ）逻辑 ---
-        function saveGameState(scene) {
+        function saveSnapshot() {
             HISTORY.push({
                 c: [...CURRENT_COUNTS],
-                w: WOODS.map(item => ({ x: item.x, y: item.y, a: item.angle, s: item.isStatic() })),
-                b: BOLTS.map(item => ({ v: item.crystal.visible, i: (item.crystal.input && item.crystal.input.enabled) }))
-            });
-        }
-
-        function doUndo(scene) {
-            if (HISTORY.length === 0) return;
-            const last = HISTORY.pop();
-
-            CURRENT_COUNTS = [...last.c];
-            CURRENT_COUNTS.forEach((n, i) => scene.texts[i].setText(n));
-
-            last.b.forEach((data, i) => {
-                BOLTS[i].crystal.setVisible(data.v);
-                BOLTS[i].glow.setVisible(data.v);
-                if (data.i) BOLTS[i].crystal.setInteractive(); else BOLTS[i].crystal.disableInteractive();
-            });
-
-            last.w.forEach((data, i) => {
-                const stone = WOODS[i];
-                stone.setStatic(true);
-                stone.setPosition(data.x, data.y);
-                stone.setAngle(data.a);
-                stone.setVelocity(0, 0); // 速度归零
-                stone.setAngularVelocity(0); // 旋转速度归零
-                stone.setStatic(data.s); // 恢复锁定状态
+                w: WOODS.map(s => ({ x: s.x, y: s.y, a: s.angle, s: s.isStatic() })),
+                b: BOLTS.map(b => ({ v: b.gem.visible }))
             });
         }
     </script>
