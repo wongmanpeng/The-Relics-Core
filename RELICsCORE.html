@@ -3,197 +3,259 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>遗迹核心：色彩觉醒</title>
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>遗迹核心：3D 觉醒</title>
     <style>
         body {
             margin: 0;
-            background: #050a05;
+            background: #000;
             overflow: hidden;
-            touch-action: none;
+            font-family: sans-serif;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-around;
+            pointer-events: none;
+        }
+
+        .stat {
+            color: white;
+            text-align: center;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        .stat-val {
+            font-size: 40px;
+            font-weight: bold;
+            display: block;
+        }
+
+        #undo-btn {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 40px;
+            border: 2px solid #d4af37;
+            color: #d4af37;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 30px;
+            cursor: pointer;
+        }
+
+        #win-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: rgba(10, 20, 10, 0.95);
+            border: 3px solid #d4af37;
+            padding: 40px;
+            text-align: center;
+            color: white;
+            border-radius: 20px;
+            transition: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
     </style>
 </head>
 
 <body>
-    <div id="game-container"></div>
+    <div id="ui-layer">
+        <div class="stat"><span id="val-0" class="stat-val" style="color:#00f8df">0</span></div>
+        <div class="stat"><span id="val-1" class="stat-val" style="color:#00ff87">0</span></div>
+        <div class="stat"><span id="val-2" class="stat-val" style="color:#fca100">0</span></div>
+        <div class="stat"><span id="val-3" class="stat-val" style="color:#b800ff">0</span></div>
+    </div>
+    <button id="undo-btn">UNDO 撤回</button>
+    <div id="win-modal">
+        <h1 style="color:#d4af37">能量已觉醒</h1>
+        <p>你已成功开启 3D 遗迹核心</p>
+        <button onclick="location.reload()"
+            style="padding:10px 20px; background:#d4af37; border:none; font-weight:bold;">再玩一次</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
     <script>
-        let HISTORY = [];
-        let CURRENT_COUNTS = [0, 0, 0, 0];
-        let WOODS = [];
-        let BOLTS = [];
-        let IS_GAMEOVER = false;
-        // 严格对应的颜色阵列：青色(0)、绿色(1)、橙色(2)、紫色(3)
+        let scene, camera, renderer, world;
+        let crystals = [], stones = [], history = [];
+        let counts = [0, 0, 0, 0];
         const COLORS = [0x00f8df, 0x00ff87, 0xfca100, 0xb800ff];
 
-        const AudioSynth = {
-            ctx: null,
-            play(freq, type = 'sine', dur = 0.1) {
-                try {
-                    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-                    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
-                    o.type = type; o.frequency.setValueAtTime(freq, this.ctx.currentTime);
-                    g.gain.setValueAtTime(0.1, this.ctx.currentTime);
-                    g.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + dur);
-                    o.connect(g); g.connect(this.ctx.destination);
-                    o.start(); o.stop(this.ctx.currentTime + dur);
-                } catch (e) { }
-            }
-        };
+        init();
+        animate();
 
-        const config = {
-            type: Phaser.AUTO,
-            width: 750,
-            height: 1334,
-            parent: 'game-container',
-            backgroundColor: '#020502',
-            physics: { default: 'matter', matter: { gravity: { y: 2.8 }, debug: false } },
-            scene: { create },
-            scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }
-        };
+        function init() {
+            // --- 1. Three.js 场景 ---
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050a05);
+            scene.fog = new THREE.FogExp2(0x050a05, 0.05);
 
-        new Phaser.Game(config);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 15);
 
-        function create() {
-            const { width, height } = this.scale;
-            const scene = this;
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
 
-            // --- 1. 纹理绘制 ---
-            const g = this.make.graphics({ x: 0, y: 0, add: false });
-            // 石板
-            g.fillStyle(0x3d453d).fillRect(0, 0, 500, 80);
-            g.lineStyle(4, 0x1a201a).strokeRect(2, 2, 496, 76);
-            g.generateTexture('stone', 500, 80);
-            g.clear();
-            // 水晶
-            g.fillStyle(0xffffff).fillPoints([{ x: 25, y: 0 }, { x: 50, y: 15 }, { x: 50, y: 35 }, { x: 25, y: 50 }, { x: 0, y: 35 }, { x: 0, y: 15 }], true);
-            g.generateTexture('crystal', 50, 50);
-            g.clear();
-            // 弹窗
-            g.fillStyle(0x111, 0.95).fillRoundedRect(0, 0, 550, 350, 30);
-            g.lineStyle(5, 0xd4af37).strokeRoundedRect(4, 4, 542, 342, 30);
-            g.generateTexture('modal', 550, 350);
+            // 灯光
+            const ambient = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambient);
+            const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+            sun.position.set(5, 10, 7);
+            scene.add(sun);
 
-            // --- 2. 顶部：带颜色对应的仪式碗 ---
-            this.texts = [];
-            this.bowlGlows = []; // 存储光晕以便做动画
+            // --- 2. Cannon.js 物理世界 ---
+            world = new CANNON.World();
+            world.gravity.set(0, -15, 0);
 
-            COLORS.forEach((color, i) => {
-                const x = 125 + i * 165;
-                const y = 160;
-
-                // 碗底座
-                this.add.circle(x, y, 65, 0x1a1a1a).setStrokeStyle(3, 0x333);
-
-                // --- 核心优化：对应的颜色光晕 ---
-                const glow = this.add.circle(x, y, 55, color, 0.3).setDepth(1);
-                this.bowlGlows.push(glow);
-
-                // 呼吸灯效果
-                this.tweens.add({ targets: glow, alpha: 0.1, scale: 0.9, duration: 2000, yoyo: true, repeat: -1 });
-
-                // 计数文字
-                const t = this.add.text(x, y, '0', {
-                    fontSize: '65px', color: '#ffffff', fontStyle: 'bold'
-                }).setOrigin(0.5).setDepth(2).setShadow(2, 2, '#000', 2);
-
-                this.texts.push(t);
-            });
-
-            // --- 3. 物理关卡 ---
+            // --- 3. 创建关卡 (爱心结构) ---
             const layout = [
-                { x: 230, y: 550, angle: -35, w: 320, c: 0 }, // 青
-                { x: 520, y: 550, angle: 35, w: 320, c: 0 },  // 青
-                { x: 375, y: 780, angle: 0, w: 520, c: 2 },   // 橙
-                { x: 180, y: 1050, angle: 90, w: 380, c: 1 },  // 绿
-                { x: 570, y: 1050, angle: 90, w: 380, c: 3 }   // 紫
+                { x: -3, y: 3, z: 0, rot: 0.6, w: 4.5, c: 0 },
+                { x: 3, y: 3, z: 0, rot: -0.6, w: 4.5, c: 0 },
+                { x: 0, y: 0, z: 0.5, rot: 0, w: 7, c: 2 },
+                { x: -2.5, y: -3, z: 0, rot: 1.57, w: 5, c: 1 },
+                { x: 2.5, y: -3, z: 0, rot: 1.57, w: 5, c: 3 }
             ];
 
             layout.forEach((data, i) => {
-                let stone = this.matter.add.sprite(data.x, data.y, 'stone').setDisplaySize(data.w, 85).setStatic(true).setAngle(data.angle);
-                let glow = this.add.circle(data.x, data.y, 65, COLORS[data.c], 0.25);
-                let crys = this.add.image(data.x, data.y, 'crystal').setTint(COLORS[data.c]).setScale(1.3).setInteractive();
+                // 创建 3D 石条
+                const geometry = new THREE.BoxGeometry(data.w, 0.8, 1.2);
+                const material = new THREE.MeshPhongMaterial({ color: 0x444d44 });
+                const mesh = new THREE.Mesh(geometry, material);
+                scene.add(mesh);
 
-                crys.on('pointerdown', () => {
-                    if (IS_GAMEOVER) return;
-                    saveSnapshot();
-                    AudioSynth.play(500 + data.c * 150);
+                const shape = new CANNON.Box(new CANNON.Vec3(data.w / 2, 0.4, 0.6));
+                const body = new CANNON.Body({ mass: 0 }); // 初始静止
+                body.position.set(data.x, data.y, data.z);
+                body.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), data.rot);
+                world.addBody(body);
+                stones.push({ mesh, body, initial: { x: data.x, y: data.y, z: data.z, r: data.rot } });
 
-                    crys.setVisible(false).disableInteractive();
-                    glow.setVisible(false);
-                    stone.setStatic(false); // 木头掉落
-
-                    // 更新计数
-                    CURRENT_COUNTS[data.c]++;
-                    this.texts[data.c].setText(CURRENT_COUNTS[data.c]);
-
-                    // --- 核心优化：碗的颜色反馈动画 ---
-                    const targetGlow = this.bowlGlows[data.c];
-                    scene.tweens.add({
-                        targets: targetGlow,
-                        scale: 1.5,
-                        alpha: 0.6,
-                        duration: 150,
-                        yoyo: true,
-                        ease: 'Quad.easeOut'
-                    });
-
-                    checkWin(scene);
+                // 创建 3D 水晶 (八面体)
+                const crysGeo = new THREE.OctahedronGeometry(0.5);
+                const crysMat = new THREE.MeshPhongMaterial({
+                    color: COLORS[data.c],
+                    emissive: COLORS[data.c],
+                    emissiveIntensity: 0.5,
+                    transparent: true
                 });
-                WOODS.push(stone);
-                BOLTS.push({ crys, glow });
+                const crysMesh = new THREE.Mesh(crysGeo, crysMat);
+                crysMesh.position.set(data.x, data.y, data.z + 0.8);
+                crysMesh.userData = { id: i, colorIdx: data.c };
+                scene.add(crysMesh);
+                crystals.push(crysMesh);
+
+                // 水晶点光源
+                const pLight = new THREE.PointLight(COLORS[data.c], 1, 3);
+                pLight.position.copy(crysMesh.position);
+                scene.add(pLight);
+                crysMesh.userData.light = pLight;
             });
 
-            // --- 4. 底部 UNDO ---
-            const uCircle = this.add.circle(width / 2, height - 120, 75, 0x1a1a1a).setStrokeStyle(4, 0xd4af37).setInteractive();
-            this.add.text(width / 2, height - 120, 'UNDO', { fontSize: '30px', color: '#d4af37' }).setOrigin(0.5);
+            // --- 4. 交互逻辑 ---
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
 
-            uCircle.on('pointerdown', () => {
-                if (HISTORY.length === 0 || IS_GAMEOVER) return;
-                const last = HISTORY.pop();
-                CURRENT_COUNTS = [...last.c];
-                CURRENT_COUNTS.forEach((n, i) => this.texts[i].setText(n));
-                last.b.forEach((b, i) => {
-                    BOLTS[i].crys.setVisible(b.v);
-                    BOLTS[i].glow.setVisible(b.v);
-                    if (b.v) BOLTS[i].crys.setInteractive();
-                });
-                last.w.forEach((w, i) => {
-                    WOODS[i].setStatic(true).setPosition(w.x, w.y).setAngle(w.a).setVelocity(0, 0).setStatic(w.s);
-                });
+            window.addEventListener('pointerdown', (event) => {
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                const intersects = raycaster.intersectObjects(crystals);
+                if (intersects.length > 0) {
+                    const obj = intersects[0].object;
+                    if (!obj.visible) return;
+
+                    saveState();
+
+                    // 收集逻辑
+                    obj.visible = false;
+                    obj.userData.light.visible = false;
+                    const cIdx = obj.userData.colorIdx;
+                    counts[cIdx]++;
+                    document.getElementById(`val-${cIdx}`).innerText = counts[cIdx];
+
+                    // 物理掉落
+                    stones[obj.userData.id].body.mass = 5;
+                    stones[obj.userData.id].body.updateMassProperties();
+
+                    checkWin();
+                }
             });
 
-            // --- 5. 成功弹窗 ---
-            this.winModal = this.add.container(width / 2, height / 2).setDepth(100).setVisible(false).setScale(0);
-            this.winModal.add([
-                this.add.image(0, 0, 'modal'),
-                this.add.text(0, -50, '能量已觉醒', { fontSize: '55px', color: '#d4af37', fontStyle: 'bold' }).setOrigin(0.5),
-                this.add.text(0, 20, '你成功引导了古老的遗迹', { fontSize: '28px', color: '#fff', alpha: 0.7 }).setOrigin(0.5),
-                this.add.rectangle(0, 100, 240, 70, 0xd4af37).setInteractive().on('pointerdown', () => location.reload()),
-                this.add.text(0, 100, '再玩一次', { fontSize: '30px', color: '#000', fontStyle: 'bold' }).setOrigin(0.5)
-            ]);
+            document.getElementById('undo-btn').addEventListener('click', undo);
         }
 
-        function checkWin(scene) {
-            if (BOLTS.every(b => !b.crys.visible)) {
-                IS_GAMEOVER = true;
-                scene.time.delayedCall(1000, () => {
-                    scene.winModal.setVisible(true);
-                    scene.tweens.add({ targets: scene.winModal, scale: 1, duration: 600, ease: 'Back.easeOut' });
-                    AudioSynth.play(1000, 'sine', 0.6);
-                });
+        function saveState() {
+            history.push({
+                counts: [...counts],
+                stones: stones.map(s => ({
+                    pos: s.body.position.clone(),
+                    quat: s.body.quaternion.clone(),
+                    mass: s.body.mass
+                })),
+                crystals: crystals.map(c => c.visible)
+            });
+        }
+
+        function undo() {
+            if (history.length === 0) return;
+            const state = history.pop();
+
+            counts = [...state.counts];
+            counts.forEach((v, i) => document.getElementById(`val-${i}`).innerText = v);
+
+            state.crystals.forEach((v, i) => {
+                crystals[i].visible = v;
+                crystals[i].userData.light.visible = v;
+            });
+
+            state.stones.forEach((s, i) => {
+                stones[i].body.position.copy(s.pos);
+                stones[i].body.quaternion.copy(s.quat);
+                stones[i].body.mass = s.mass;
+                stones[i].body.velocity.set(0, 0, 0);
+                stones[i].body.angularVelocity.set(0, 0, 0);
+                stones[i].body.updateMassProperties();
+            });
+        }
+
+        function checkWin() {
+            if (crystals.every(c => !c.visible)) {
+                setTimeout(() => {
+                    document.getElementById('win-modal').style.transform = 'translate(-50%, -50%) scale(1)';
+                }, 1500);
             }
         }
 
-        function saveSnapshot() {
-            HISTORY.push({
-                c: [...CURRENT_COUNTS],
-                w: WOODS.map(s => ({ x: s.x, y: s.y, a: s.angle, s: s.isStatic() })),
-                b: BOLTS.map(b => ({ v: b.crys.visible }))
+        function animate() {
+            requestAnimationFrame(animate);
+            world.step(1 / 60);
+
+            stones.forEach(s => {
+                s.mesh.position.copy(s.body.position);
+                s.mesh.quaternion.copy(s.body.quaternion);
             });
+
+            crystals.forEach(c => {
+                if (c.visible) c.rotation.y += 0.02; // 水晶自转
+            });
+
+            renderer.render(scene, camera);
         }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 
